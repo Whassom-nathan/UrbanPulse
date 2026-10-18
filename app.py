@@ -1,5 +1,6 @@
 from pathlib import Path
 import zipfile
+import urllib.request
 import math
 
 import pandas as pd
@@ -15,6 +16,49 @@ BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
 GTFS_PATH = DATA_DIR / "transport_gtfs.zip"
 AIR_PATH = DATA_DIR / "air_quality.csv"
+
+GTFS_URL = (
+    "https://github.com/Whassom-nathan/UrbanPulse/"
+    "releases/download/v1.0-data/transport_gtfs.zip"
+)
+
+
+def ensure_gtfs_file():
+    """Télécharge l'archive GTFS si elle n'est pas déjà présente."""
+    if GTFS_PATH.exists():
+        return
+
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    temporary_path = GTFS_PATH.with_suffix(".zip.part")
+
+    try:
+        with st.spinner("Téléchargement des données de transport (environ 150 Mo)…"):
+            request = urllib.request.Request(
+                GTFS_URL,
+                headers={"User-Agent": "UrbanPulse-Streamlit"},
+            )
+            with urllib.request.urlopen(request, timeout=120) as response:
+                with open(temporary_path, "wb") as destination:
+                    while True:
+                        chunk = response.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        destination.write(chunk)
+
+        # Vérifie l'archive avant de la conserver.
+        with zipfile.ZipFile(temporary_path, "r") as archive:
+            if "stops.txt" not in archive.namelist():
+                raise ValueError("L'archive ne contient pas stops.txt.")
+            if "routes.txt" not in archive.namelist():
+                raise ValueError("L'archive ne contient pas routes.txt.")
+
+        temporary_path.replace(GTFS_PATH)
+
+    except Exception:
+        if temporary_path.exists():
+            temporary_path.unlink()
+        raise
+
 
 st.set_page_config(
     page_title="UrbanPulse | Mobilité & qualité de l'air",
@@ -146,6 +190,12 @@ def pct_change(first, last):
 
 
 # ----------------------------- File checks -----------------------------
+try:
+    ensure_gtfs_file()
+except Exception as exc:
+    st.error(f"Impossible de télécharger les données GTFS : {exc}")
+    st.info("Vérifie le lien de la release GitHub et réessaie.")
+    st.stop()
 missing_files = [p for p in [GTFS_PATH, AIR_PATH] if not p.exists()]
 if missing_files:
     st.error("Certains fichiers de données sont introuvables :")
